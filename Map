@@ -1,0 +1,311 @@
+###################### Web API######################
+import json
+import urllib.parse
+import urllib.request
+
+MAPQUEST_API_KEY = "rZqbtpfS5MpHohDoJVC50hLJHQhVJpEt"
+BASE_MAPQUEST_URL = "http://open.mapquestapi.com/"
+
+# function to build url
+def build_search_url(start:str,ends:str)->str:
+    query_parameters = [('key',MAPQUEST_API_KEY),('from',start),('to',ends)]
+    return BASE_MAPQUEST_URL +"directions/v2/route?" + urllib.parse.urlencode(query_parameters)
+
+# function that get the web result(dictionary)of MAPQUEST
+def get_result(url: str) -> dict:
+    result = None
+    try:
+        result = urllib.request.urlopen(url)
+        json_text = result.read().decode(encoding = 'utf-8')
+#        print(json_text)
+        return json.loads(json_text)
+
+    finally:
+        if result != None:
+            result.close()
+
+# function that build latitude and longtitude str for finding elevation
+def build_latlng(search_result:dict,state:int)->str:
+    latlng = ""
+    for item in search_result['route']['legs']:
+        lati = item['maneuvers'][state]['startPoint']['lat']
+        long = item['maneuvers'][state]['startPoint']['lng']
+        latlng = str(lati)+","+str(long)
+    return latlng
+
+# function for build url to find elevation
+def build_elev_url(latlng:str)->str:
+    query_parameters = [('key',MAPQUEST_API_KEY),('shapeFormat','raw'),
+                        ('latLngCollection',latlng)]
+    return BASE_MAPQUEST_URL + "elevation/v1/profile?" + urllib.parse.urlencode(query_parameters)
+
+# function to get elevation result dict from MAPQUEST
+def get_elev(url: str) -> dict:
+    result = None
+    try:
+        result = urllib.request.urlopen(url)
+        json_text = result.read().decode(encoding = 'utf-8')
+        return json.loads(json_text)
+
+    finally:
+        if result != None:
+            result.close()
+
+# function that combines all the functions to find elevtion 
+def combine_result(search_result,state)->dict:
+    latlong = build_latlng(search_result,state)
+    url = build_elev_url(latlong)
+    result = get_elev(url)
+    return result
+    
+    
+    
+    
+    ###################################### MAP CLASS##################################
+    # class of finding directions
+class Steps:
+    def action(self,result)->list:
+        r_list = []
+        for item in result['route']['legs']:
+            for things in item['maneuvers']:
+                r_list.append(things['narrative'])
+        return r_list
+# class of finding Total Distance
+class TotalDis:
+    def action(self,result)->list:
+        r_list = []
+        for item in result['route']['legs']:
+            r_list.append(item['distance'])
+        return r_list
+
+# class of finding Total Time   
+class TotalTime:
+    def action(self,result)->list:
+        r_list = []
+        for item in result['route']['legs']:
+            time = item['formattedTime']
+            time_list = time.split(":")
+            if time_list[0].startswith("0"):
+                time_list[0] == time_list[0][-1]
+            if time_list[-1].startswith("0"):
+                time_list[-1] == time_list[-1][-1]
+            if int(time_list[-1]) >= 30:
+                minutes = int(time_list[0])*60 + int(time_list[1]) + 1
+            else:
+                minutes = int(time_list[0])*60 + int(time_list[1])
+        r_list.append(minutes)
+        return r_list
+
+# class of finding latitude and longtitude           
+class Latlong:
+    def action(self,result,state)->list:
+        r_list = []
+        for item in result['route']['legs']:
+            lati = item['maneuvers'][state]['startPoint']['lat']
+            long = item['maneuvers'][state]['startPoint']['lng']
+            if int(lati) >= 0:
+                lati = str(round(lati,2)) + "N"
+            else:
+                a = round(lati,2)
+                lati = str(a*-1) + "S"
+            if int(long) >= 0:
+                long = str(round(long,2)) + "E"
+            else:
+                o = round(long,2)
+                long = str(o*-1) + "W"
+        r_list.append(lati)
+        r_list.append(long)
+        return r_list
+
+# class of finding elevation
+class Elevation:
+    def action(self,result)->list:
+        r_list = []
+        for items in result['elevationProfile']:
+            elevation = round(items['height'] * 3.28084)
+            r_list.append(elevation)
+        return r_list
+
+# class to create MapQuestError
+class MapQuestError(Exception):
+    pass
+
+# class to create NoRouteError
+class NoRouteError(Exception):
+    pass
+
+
+
+ ##############################################  user interface ######################33
+import webapi
+import mapclass
+
+# function that convert list to string 
+def list_to_str(result_list:list)->str:
+    answer_str = ""
+    for item in result_list:
+        answer_str = answer_str + item + " "
+    return answer_str
+
+# function that generate all the user input into a list
+def deal_input()->list:
+    n = int(input())
+    count_1 = 0
+    answer_list = []
+    answer_list.append(n)
+    while count_1<n:
+        content = input()
+        answer_list.append(content)
+        count_1+= 1
+    m = int(input())
+    count_2 = 0
+    answer_list.append(m)
+    while count_2<m:
+        content = input()
+        answer_list.append(content)
+        count_2+= 1
+    return answer_list
+
+# function that get web result of infor dict
+def build(start:str,end:str)->dict:
+    url = webapi.build_search_url(start,end)
+    result = webapi.get_result(url)
+    return result
+
+# function that print list nicely
+def print_list(final_list:list):
+    for item in final_list:
+        print(item)
+    print()
+
+# function that print str nicely
+def print_str(condition:str,final_list:list,units:str):
+    answer = 0
+    for item in final_list:
+        answer += item
+    print(condition + str(round(answer)) + units + "\n")
+
+# function that deal with elevation
+def deal_elevation(answer_list:list,index:int,i:int)->list:
+    result = build(answer_list[i],answer_list[i+1])
+    responce = webapi.combine_result(result,index)
+#   create Elevation object
+    a = mapclass.Elevation()
+    r_list = a.action(responce)
+    return r_list
+
+# function that deal with latlong
+def deal_Latlong(answer_list:list,index:int,i:int):
+    result = build(answer_list[i],answer_list[i+1])
+#   create Latlong object
+    a = mapclass.Latlong()
+    r_list = a.action(result,index)
+    print(list_to_str(r_list))
+
+# function that based on input to determine what to do 
+def step(answer_list:list,m,n):
+#   n is the number of the first line of input    
+    r_list = []
+    for j in range(m,m+n+2):
+        if answer_list[j].upper()=="STEPS":
+            final_list = []
+            print("DIRECTIONS")
+            for i in range(1,n):
+                result = build(answer_list[i],answer_list[i+1])
+#               create Step object
+                a = mapclass.Steps()
+                r_list = a.action(result)
+                final_list.extend(r_list)
+            print_list(final_list)
+                    
+        elif answer_list[j].upper()=="TOTALDISTANCE":
+            final_list = []
+            for i in range(1,n):
+                result = build(answer_list[i],answer_list[i+1])
+#               create TotalDis object
+                a = mapclass.TotalDis()
+                r_list = a.action(result)
+                final_list.extend(r_list)
+            print_str("TOTAL DISTANCE: ",final_list," miles")
+                
+        elif answer_list[j].upper()=="TOTALTIME":
+            final_list = []
+            for i in range(1,n):
+                result = build(answer_list[i],answer_list[i+1])
+#               create TotalTime object                
+                a = mapclass.TotalTime()
+                r_list = a.action(result)
+                final_list.extend(r_list)
+            print_str("TOTAL TIME: ",final_list," minutes")
+                
+        elif answer_list[j].upper()=="LATLONG":
+            print("LATLONG")
+            final_list = []
+#          for-loop that get the latlongs of all the
+#          different locations without the last location            
+            for i in range(1,n):
+                deal_Latlong(answer_list,0,i)
+# statement to get the latlong of the final destination                
+            deal_Latlong(answer_list,-1,i)
+            print()
+                    
+        elif answer_list[j].upper()=="ELEVATION":
+            print("ELEVATIONS")
+            final_list = []
+#          for-loop that get the elevations of all
+#          different locations without the last location
+            for i in range(1,n):
+                r_list = deal_elevation(answer_list,0,i)
+                final_list.extend(r_list)
+# statements to get the elevation of the final destination
+            r_list = deal_elevation(answer_list,-1,i)
+            final_list.extend(r_list)
+            print_list(final_list)
+        else:
+            print("Invalid output type: " + answer_list[j])
+
+def handle():
+    answer_list = deal_input()
+    n = answer_list[0]
+    m = answer_list[int(n)+1]
+    print()
+    for i in range(1,n):
+        url = webapi.build_search_url(answer_list[i],answer_list[i+1])
+        result = webapi.get_result(url)
+    try:
+        if result['info']['statuscode'] == 0:
+            step(answer_list,m,n)
+        elif result['info']['statuscode'] == 402:
+            raise mapclass.NoRouteError
+        else:
+            raise mapclass.MapQuestError 
+    except mapclass.MapQuestError:
+        print("MAPQUEST ERROR")
+    except mapclass.NoRouteError:
+        print("NO ROUTE FOUND")
+    finally:
+        print("Directions Courtesy of MapQuest; Map Data Copyright OpenStreetMap Contributors")
+  
+if __name__ == '__main__':
+    handle()
+
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
